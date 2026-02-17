@@ -1114,6 +1114,584 @@ However, we believe that the benefits of the Gatekeeper Agent far outweigh the c
 The future of DevSecOps is autonomous. The Gatekeeper Agent is a critical step on the journey to that future.
 
 
+# Platform-Core Context Engine
+
+## Context Engine Overview
+
+The Context Engine is the central nervous system of the devops-gollms platform, providing a unified context substrate that all five agents consume and contribute to. Rather than each agent independently gathering context from disparate sources, the Context Engine maintains a living, continuously-updated representation of the entire engineering organization's state — code, infrastructure, incidents, deployments, team topology, and operational history.
+
+The fundamental insight driving this architecture is that agent effectiveness is directly proportional to the quality and completeness of context they receive. An Auto-Triage agent investigating a production alert needs to understand not just the immediate error, but the service's dependency graph, recent deployments, historical incident patterns, team ownership, and relevant runbook procedures. The Context Engine pre-computes and maintains this rich context substrate so that agents can query for assembled, relevant context in milliseconds rather than spending minutes gathering it from scratch.
+
+The Context Engine serves three core functions:
+
+1. **Continuous Ingestion**: Consumes events from all connected systems (GitHub, Sentry, PagerDuty, AWS, CI/CD pipelines) and maintains synchronized representations across multiple specialized data stores.
+2. **Intelligent Assembly**: When an agent requests context, the engine queries across stores, merges results, ranks by relevance, and compresses the assembled context to fit within token budgets.
+3. **Recursive Reasoning**: For context that exceeds manageable sizes, the engine employs RLM (Recursive Language Model) techniques to decompose and reason over unbounded context without degradation.
+
+## Context Graph Architecture
+
+The Context Engine is built on a polyglot persistence architecture, with each data store optimized for a specific query pattern. These stores are kept in sync through an event-driven ingestion pipeline and exposed through a unified gRPC API.
+
+```mermaid
+graph TB
+    subgraph External["External Systems"]
+        GH[GitHub]
+        SENTRY[Sentry]
+        PD[PagerDuty]
+        AWS[AWS/Cloud]
+        CI[CI/CD Pipelines]
+    end
+
+    subgraph Ingestion["Ingestion Layer"]
+        WH[Webhook Gateway]
+        COCO[CocoIndex Pipeline]
+    end
+
+    subgraph ContextEngine["Context Engine"]
+        API[Context Graph API - Go/gRPC]
+        QP[Query Planner]
+        CA[Context Assembler]
+
+        subgraph Stores["Data Stores"]
+            NEO[Neo4j 5.x + Graphiti\nKnowledge Graph]
+            PGV[pgvector\nVector Store]
+            PG[PostgreSQL + TimescaleDB\nStructured Store]
+            REDIS[Redis\nContext Cache L2]
+        end
+
+        subgraph Streaming["Event Infrastructure"]
+            NATS[NATS JetStream\nEvent Bus]
+        end
+
+        subgraph Interchange["Data Interchange"]
+            ARROW[Apache Arrow / Flight\nGo↔Python Zero-Copy]
+        end
+    end
+
+    subgraph Agents["Agent Layer"]
+        AT[Auto-Triage]
+        MI[Mirror]
+        SC[Scaffolder]
+        JA[Janitor]
+        GK[Gatekeeper]
+    end
+
+    External --> WH
+    WH --> NATS
+    NATS --> COCO
+    COCO --> NEO
+    COCO --> PGV
+    COCO --> PG
+
+    API --> QP
+    QP --> CA
+    CA --> NEO
+    CA --> PGV
+    CA --> PG
+    CA --> REDIS
+    CA --> ARROW
+
+    NATS --> API
+
+    Agents --> API
+    API --> Agents
+```
+
+### Knowledge Graph (Neo4j 5.x + Graphiti)
+
+The Knowledge Graph stores the structural relationships that define the engineering organization: service topology, dependency chains, team ownership, incident causality, and deployment lineage. Neo4j's native graph storage provides sub-millisecond traversals for questions like "what services depend on payment-service?" or "who owns the services affected by this alert?"
+
+Graphiti extends Neo4j with temporal bi-tracking and agent episodic memory. Every relationship in the graph carries temporal metadata (valid_from, valid_to), enabling queries like "what did the dependency graph look like at the time of the incident?" Graphiti also maintains episodic memory for each agent, recording past investigations, decisions, and outcomes so agents can learn from their own history.
+
+### Vector Store (pgvector on PostgreSQL)
+
+The Vector Store enables semantic similarity search over unstructured content: code files, documentation, runbooks, incident post-mortems, and Slack conversations. Using pgvector as a PostgreSQL extension (rather than a standalone vector database like Pinecone or Weaviate) avoids introducing an additional operational dependency — the same PostgreSQL instance serves both structured queries and vector search.
+
+Embeddings are generated using a code-optimized model (e.g., Voyage Code 3 or similar) and indexed with HNSW for approximate nearest-neighbor search. The vector store is particularly valuable for the Auto-Triage agent (finding similar past incidents) and the Scaffolder (finding similar existing services to use as templates).
+
+### Structured Store (PostgreSQL + TimescaleDB)
+
+The Structured Store handles operational records that require exact-match queries, aggregations, and time-series analysis: deployment metadata, CI/CD pipeline runs, configuration snapshots, SLA metrics, and cost data. TimescaleDB's hypertable extension provides automatic partitioning and compression for time-series data, enabling efficient queries like "show me all deployments to production in the last 24 hours" or "what's the P99 latency trend for this service?"
+
+### Event Stream (NATS JetStream)
+
+NATS JetStream serves as the event backbone, providing durable message streaming with at-least-once delivery guarantees. All external events (webhooks, polling results) are published to NATS subjects, which trigger CocoIndex pipelines for store updates and notify agents of relevant changes.
+
+NATS was chosen over Kafka for several reasons: it is Go-native (aligning with the platform's primary language), has significantly lower operational overhead, supports request/reply patterns (useful for synchronous agent queries), and provides sufficient throughput for the expected event volumes. Durable subscriptions ensure no events are lost during consumer downtime.
+
+### CocoIndex (Incremental Indexing Pipeline)
+
+CocoIndex serves as the synchronization engine that keeps all stores consistent. When an event arrives on NATS, CocoIndex pipelines process it incrementally — updating only the affected nodes in Neo4j, re-embedding only the changed documents in pgvector, and inserting only the new records in PostgreSQL. This incremental approach is critical for maintaining low-latency updates without full reindexing.
+
+CocoIndex pipelines are defined declaratively and support multi-target export, meaning a single incoming event can trigger coordinated updates across all three stores. Built in Rust, CocoIndex provides the performance characteristics needed for high-throughput event processing.
+
+### Apache Arrow / Arrow Flight (Go-to-Python Data Interchange)
+
+While the Context Graph API and most platform infrastructure are written in Go, the RLM reasoning engine and some ML pipelines run in Python. Apache Arrow provides a columnar, zero-copy data format that both languages can read natively, eliminating serialization overhead for metrics, time-series data, and large result sets. Arrow Flight extends this with a gRPC-based transport for streaming Arrow data between processes.
+
+This is used selectively — only for bulk data transfers like time-series metrics or large code analysis results — not for every inter-process call. Most agent-to-API communication uses standard gRPC with Protocol Buffers.
+
+### Redis (Context Cache L2)
+
+Redis serves as the L2 cache for assembled context. When an agent requests context for a particular entity, the Context Assembler first checks Redis for a cached result. Cache entries are invalidated both by TTL and by event-driven signals from NATS — when a relevant event arrives (e.g., a new deployment for a service), all cached context entries for that service are proactively invalidated.
+
+## Context Graph API
+
+The Context Graph API is the unified query layer through which all agents interact with the Context Engine. Implemented in Go with gRPC, it provides a single interface that abstracts the complexity of the underlying polyglot persistence layer.
+
+### Query Planner
+
+The Query Planner analyzes each incoming context request and determines which backend stores to query based on the request type and parameters. For example, an incident context request triggers graph traversal (for dependencies), vector search (for similar incidents), and structured lookup (for recent deployments), while a scaffold context request might skip the time-series query entirely.
+
+The Query Planner also handles query optimization: parallelizing independent backend queries, estimating result sizes, and applying early termination when sufficient context has been gathered.
+
+### Context Assembler
+
+The Context Assembler takes the raw results from multiple backend queries and produces a unified, ranked, and compressed context package. This involves:
+
+- **Deduplication**: Removing redundant information that appears in multiple stores
+- **Relevance Ranking**: Scoring each piece of context by recency, relationship distance, and semantic similarity to the query
+- **Token Budgeting**: Estimating token counts for each context element and pruning lower-ranked elements to fit within the agent's specified token budget
+- **Format Optimization**: Structuring the output for optimal LLM consumption (e.g., presenting graph relationships as structured lists rather than raw JSON)
+
+### Backend Connectors
+
+Each backend store is accessed through a dedicated connector with connection pooling, health checking, and circuit breaking:
+
+- **Neo4j**: Bolt protocol via the official Go driver, with Cypher query templates
+- **PostgreSQL/pgvector/TimescaleDB**: pgx driver with prepared statements and connection pooling
+- **NATS**: nats.go client with JetStream consumer groups
+- **Redis**: go-redis with sentinel support for high availability
+
+### API Types
+
+```go
+type ContextRequest struct {
+    EntityID    string
+    EntityType  EntityType
+    QueryType   QueryType // INCIDENT, PR_RISK, SCAFFOLD, REFACTOR
+    MaxTokens   int
+    IncludeGraph bool
+    IncludeVector bool
+    IncludeTimeSeries bool
+}
+
+type AssembledContext struct {
+    GraphContext    *GraphResult    // Related entities, dependencies, ownership
+    VectorContext   *VectorResult   // Semantically similar docs, incidents, code
+    StructuredData  *StructuredResult // Deployment records, metrics, configs
+    Metadata        ContextMetadata
+    TokenEstimate   int
+}
+```
+
+## Context Query Patterns
+
+The Context Engine supports several pre-defined query patterns optimized for each agent's primary use cases. These patterns define which stores to query, how to combine results, and what relevance signals to prioritize.
+
+### 1. Incident Context (Auto-Triage Agent)
+
+When the Auto-Triage agent receives an alert, it requests incident context for the affected service. The query pattern is:
+
+1. **Graph Traversal**: Starting from the affected service node, traverse dependency edges (both upstream and downstream) to identify the blast radius. Retrieve team ownership, recent change authors, and on-call information. Depth: 2-3 hops.
+2. **Vector Search**: Using the alert description and error message as the query, search for semantically similar past incidents. Rank by similarity score and recency. Return top 5 matches with their root causes and resolution steps.
+3. **Structured Lookup**: Query for all deployments to the affected service and its dependencies in the last 48 hours. Retrieve CI/CD pipeline status, configuration changes, and relevant time-series metrics (error rate, latency, throughput).
+
+The assembled context gives the Auto-Triage agent a comprehensive view: what changed recently, what depends on the broken service, what similar incidents looked like in the past, and who to notify.
+
+### 2. PR Risk Assessment (Gatekeeper Agent)
+
+When a pull request is opened, the Gatekeeper agent requests PR risk context:
+
+1. **Graph Lookup**: Identify all services affected by the changed files. Traverse to find downstream dependents that might be impacted. Retrieve the security classification of affected services (e.g., PCI-scope, PII-handling).
+2. **Vector Search**: Using the PR diff as the query, search for related security policies, compliance requirements, and past security findings in similar code. Retrieve relevant sections from the organization's security playbook.
+3. **Structured Query**: Look up the change frequency for the affected files (high churn = higher risk), the author's historical review patterns, and the test coverage metrics for the changed modules.
+
+### 3. Scaffold Context (Scaffolder Agent)
+
+When the Scaffolder agent is bootstrapping a new service, it requests organizational context:
+
+1. **Graph Traversal**: Explore the existing service topology to understand organizational patterns — naming conventions, common dependencies, standard infrastructure components. Retrieve the team's existing services as reference implementations.
+2. **Vector Search**: Using the new service's specification as the query, find the most similar existing services in the codebase. Retrieve their project structures, CI/CD configurations, and IaC templates as starting points.
+3. **Structured Lookup**: Query compliance requirements for the target environment (e.g., SOC2 controls, data residency requirements), approved dependency lists, and infrastructure quotas.
+
+## RLM-Inspired Context Management (Key Innovation)
+
+The Recursive Language Model (RLM) approach, derived from the research by Zhang & Kraska (arXiv:2512.24601), provides the core innovation for the Context Engine's ability to handle unbounded context without degradation. This is the architectural element that distinguishes the devops-gollms platform from conventional RAG-based agent systems.
+
+### The Problem: Context Rot
+
+Context rot refers to the well-documented degradation in LLM accuracy as context length increases, even when the context remains within the model's stated context window. Research has consistently shown that LLMs struggle with information placed in the middle of long contexts ("lost in the middle" effect), and that accuracy degrades monotonically with context length across all benchmarks. For an agentic system that needs to reason over potentially millions of tokens of context — spanning codebases, incident histories, dependency graphs, and operational data — context rot is an existential threat to reliability.
+
+Traditional approaches (RAG, summarization, sliding windows) mitigate but do not solve this problem. RAG reduces context size through retrieval, but the retrieved context can still exceed manageable limits. Summarization loses detail. Sliding windows lose historical context. The RLM approach offers a fundamentally different solution.
+
+### How RLM Works
+
+Instead of feeding assembled context directly into an LLM's token window, the RLM architecture treats context as an external environment variable accessible through a Python REPL. The root LLM never sees the full context — instead, it writes code to inspect, filter, partition, and process context through sub-LLM calls. This creates a recursive tree of bounded-context LLM invocations where each individual call operates on a manageable subset of the total context.
+
+The RLM system provides the root LLM with a `completion()` function that can invoke sub-LLM calls. The root LLM's task is not to answer the question directly, but to write a Python program that decomposes the question, processes context in manageable chunks, and assembles the final answer programmatically.
+
+### Five Emergent Strategies
+
+Through this architecture, five key reasoning strategies emerge naturally:
+
+1. **Peeking**: The root LLM examines the first portion of the context (e.g., `context[:1000]`) to understand its structure, format, and content distribution before deciding how to process it. This is analogous to a human skimming a document before reading it in detail.
+
+2. **Grepping**: The root LLM uses regex and keyword filtering (`re.findall()`, string matching) to narrow the search space before invoking expensive sub-LLM calls. This dramatically reduces the amount of context that needs to be processed by LLMs.
+
+3. **Partition + Map**: The root LLM chunks the context into manageable pieces and launches parallel sub-LLM calls to process each chunk independently. Results are then aggregated. This is the classic map-reduce pattern applied to LLM reasoning.
+
+4. **Iterative Summarization**: The root LLM chunks context by semantic boundaries (e.g., per-file, per-incident, per-service), summarizes each chunk via a sub-LLM call, and then aggregates the summaries into a final answer. This preserves more detail than a single-pass summarization.
+
+5. **Variable Stitching**: The root LLM stores intermediate results from sub-calls in REPL variables and builds the final answer programmatically by combining and transforming these intermediate results. This enables complex multi-step reasoning that would be impossible in a single LLM call.
+
+### Context Rot Mitigation
+
+RLM mitigates context rot because each individual LLM call operates on a manageable subset of the total context. The root LLM's own context grows slowly — it contains only its reasoning trace and truncated results from sub-calls, not the full context being analyzed. Sub-LLMs each see only their assigned chunk, well within the size range where LLMs perform reliably.
+
+This architectural property means that the system's accuracy does not degrade with context size — it degrades only with reasoning depth (the depth of the recursive call tree), which is bounded and controllable.
+
+### Integration Architecture
+
+The RLM engine integrates with the Context Engine's other components to form a complete reasoning pipeline:
+
+- **Knowledge Graph** answers "what entities are related?" — providing the structural skeleton of the context
+- **Vector Store** answers "what content is similar?" — providing relevant unstructured content
+- **RLM** answers "how do I reason over all this assembled context without degradation?" — providing the reasoning capability
+
+The RLM REPL environment is extended with custom tool functions that allow the root LLM to query the Context Engine's stores directly:
+
+- `query_knowledge_graph(cypher_query)` — Execute Cypher queries against Neo4j
+- `search_vectors(query_text, top_k)` — Semantic search against pgvector
+- `get_service_topology(service_id, depth)` — Retrieve dependency graph
+- `get_recent_deployments(service_id, hours)` — Query structured deployment data
+- `get_metrics(service_id, metric_name, duration)` — Retrieve time-series metrics
+
+This means the RLM can not only reason over pre-assembled context but can also dynamically query for additional context as its investigation progresses — a capability that is critical for the Auto-Triage agent's open-ended investigation workflow.
+
+### Persistent Mode
+
+For iterative agent workflows — such as the Janitor agent's multi-file refactoring loops or the Auto-Triage agent's investigation sequences — the RLM engine supports persistent mode. In this mode, the REPL environment is preserved across multiple `completion()` calls, allowing the agent to build up state, store intermediate findings, and refine its analysis over multiple iterations.
+
+This is implemented by serializing the REPL's variable state (using JSON for structured data and language-native serialization for Python objects) between workflow steps. When the agent's Temporal workflow resumes after a timer or external event, the REPL state is deserialized and the agent can continue where it left off.
+
+### Cost-Tiered Model Routing
+
+The RLM architecture naturally supports cost optimization through tiered model routing:
+
+- **Root LLM (Expensive)**: Uses a capable model (Claude Sonnet/Opus class) for high-level strategy — deciding how to decompose the problem, which stores to query, and how to assemble the final answer.
+- **Sub-call LLMs (Cheap)**: Uses a fast, cost-effective model (Claude Haiku class) for per-chunk analysis — summarizing individual incidents, extracting key facts from code files, or classifying risk levels.
+
+This tiering is critical for cost control. In a naive approach, processing 100 code files would require 100 calls to an expensive model. With RLM tiering, one expensive call decides the strategy, and 100 cheap calls do the per-file analysis.
+
+### Performance Benchmarks
+
+The RLM approach demonstrates dramatic improvements over direct long-context LLM usage, particularly as context scales:
+
+| Benchmark | Context Size | Base Model | RLM | Improvement |
+|-----------|-------------|-----------|-----|-------------|
+| OOLONG (132K tokens) | 132K | GPT-5: 44% | RLM(GPT-5-mini): >33% better | +114% relative |
+| BrowseComp+ | ~10M tokens | GPT-5: ~0% | RLM(GPT-5): 91-100% | Enabling |
+| OOLONG-Pairs | Quadratic | GPT-5: 0.04% | RLM: 58% | 1450x |
+
+The most striking result is BrowseComp+, where the task requires reasoning over approximately 10 million tokens of web content. Base models score near 0% regardless of their context window size, while RLM achieves 91-100% accuracy by decomposing the task into manageable sub-problems. This demonstrates that RLM is not merely an optimization — it enables reasoning over context sizes that are fundamentally impossible for direct approaches.
+
+## Event-Driven Data Flow
+
+The Context Engine uses an event-driven architecture to maintain near-real-time synchronization between external systems and its internal stores. This ensures that agents always have access to current context without relying on periodic batch imports.
+
+```mermaid
+sequenceDiagram
+    participant GH as GitHub
+    participant WH as Webhook Gateway
+    participant NATS as NATS JetStream
+    participant COCO as CocoIndex
+    participant NEO as Neo4j
+    participant PGV as pgvector
+    participant PG as PostgreSQL
+    participant REDIS as Redis
+    participant AT as Auto-Triage
+
+    GH->>WH: Push event / PR opened
+    WH->>NATS: Publish event
+    par Store Updates
+        NATS->>COCO: Trigger indexing
+        COCO->>NEO: Update graph
+        COCO->>PGV: Update embeddings
+        COCO->>PG: Update records
+    and Cache Invalidation
+        NATS->>REDIS: Invalidate affected keys
+    and Agent Triggers
+        NATS->>AT: Notify relevant agents
+    end
+```
+
+The webhook gateway normalizes incoming events from different sources into a common envelope format before publishing to NATS. Each source has a dedicated NATS subject (e.g., `events.github.push`, `events.sentry.issue`, `events.pagerduty.incident`), and CocoIndex pipelines subscribe to the subjects relevant to their update targets.
+
+Cache invalidation is proactive rather than lazy — when a deployment event arrives for service X, all cached context entries that include service X are immediately invalidated via NATS subscription, ensuring that the next agent query will fetch fresh data rather than stale cache entries.
+
+## Caching Strategy
+
+The Context Engine implements a three-tier caching strategy to balance query latency against data freshness:
+
+### L1: In-Process Cache
+
+Each agent process maintains an in-process cache using Go's `sync.Map` with a 60-second TTL. This cache stores recently-queried context for the agent's current investigation or task. The short TTL ensures that agents do not operate on significantly stale data, while the in-process location eliminates network round-trips for repeated queries within a single investigation.
+
+### L2: Redis Cache
+
+Redis serves as the shared L2 cache for assembled context packages. Cache keys are derived from the context request parameters (entity ID, entity type, query type, and a version hash of the relevant graph nodes). Cache invalidation is dual-mode:
+
+- **TTL-based**: Default TTL of 5 minutes, configurable per entity type (shorter for high-churn services, longer for stable infrastructure)
+- **Event-driven**: NATS subscriptions proactively invalidate cache entries when relevant events arrive, ensuring freshness even before TTL expiry
+
+### L3: Source Stores
+
+When both L1 and L2 caches miss, the Context Assembler queries the source stores directly (Neo4j, pgvector, PostgreSQL). Results are then cached in both L2 (Redis) and L1 (in-process) for subsequent queries.
+
+Cache hit rates are expected to be high for the L2 tier, as multiple agents often query context for the same entities during an active incident or PR review.
+
+## Technology Decision Matrix
+
+| Component | Technology | Justification |
+|-----------|-----------|---------------|
+| Knowledge Graph | Neo4j 5.x + Graphiti | Industry-standard graph database; Graph Data Science library for path analysis; Graphiti for temporal bi-tracking and agent episodic memory |
+| Vector Store | pgvector | Single PostgreSQL instance serves both structured and vector queries; HNSW indexes for fast ANN search; avoids additional operational burden of a standalone vector DB |
+| Structured Store | PostgreSQL + TimescaleDB | Battle-tested relational database; hypertables for automatic time-series partitioning and compression; same instance as pgvector |
+| Indexing Pipeline | CocoIndex | Incremental processing avoids full reindexing; multi-target export for coordinated store updates; Rust performance for high-throughput event processing |
+| Event Streaming | NATS JetStream | Lightweight and Go-native; supports request/reply patterns; durable streams with at-least-once delivery; significantly lower operational overhead than Kafka |
+| Data Interchange | Apache Arrow / Arrow Flight | Zero-copy columnar format for Go-to-Python data transfer; Arrow Flight for gRPC-based streaming; selective use for bulk data only |
+| Context Cache | Redis | Sub-millisecond L2 cache reads; TTL + event-driven invalidation; Sentinel for high availability |
+| Context API | Go (gRPC) | Unified interface for all agent queries; gRPC for efficient binary serialization and streaming; native Go concurrency for parallel backend queries |
+| RLM Reasoning | Python (pip install rlms) | Recursive context decomposition without accuracy degradation; Docker sandboxing for production safety; cost-tiered model routing |
+
+## Production Deployment Architecture
+
+The Context Engine is deployed as a set of Kubernetes services with the following topology:
+
+**Context Graph API** (Go): 3 replicas, 2 CPU / 4GB RAM each. Handles all agent queries, manages connection pools to backend stores, and implements the Query Planner and Context Assembler logic. Horizontally scalable based on query load.
+
+**CocoIndex Workers** (Rust): 2 replicas, 1 CPU / 2GB RAM each. Process NATS events and update backend stores. Scaled based on event throughput.
+
+**RLM Engine** (Python): 2 replicas, 2 CPU / 8GB RAM each. Runs Docker-sandboxed REPL environments for RLM reasoning. Each replica can handle multiple concurrent REPL sessions. Memory-intensive due to REPL state persistence.
+
+**Neo4j** (Stateful): 3-node cluster (1 leader + 2 followers), 4 CPU / 16GB RAM each. SSD storage with enough capacity for the full knowledge graph. Graph Data Science library loaded for path analysis algorithms.
+
+**PostgreSQL** (Stateful): Primary + 1 read replica, 4 CPU / 16GB RAM each. Hosts pgvector extension, TimescaleDB extension, and all structured data. SSD storage with enough capacity for embeddings and time-series data.
+
+**NATS JetStream** (Stateful): 3-node cluster, 1 CPU / 2GB RAM each. Durable streams for all event subjects with 7-day retention.
+
+**Redis** (Stateful): Sentinel configuration with 1 primary + 2 replicas, 2 CPU / 8GB RAM each. Configured for LRU eviction when memory is full, with event-driven invalidation as the primary freshness mechanism.
+
+Total estimated resource footprint: ~50 CPU cores, ~130GB RAM across all Context Engine components. This represents a significant infrastructure investment, justified by the dramatic improvement in agent effectiveness when operating on rich, pre-assembled context versus ad-hoc context gathering.
+
+
+# Generative UI / UX Layer
+
+## UI Architecture Overview
+
+The UI layer implements a three-protocol architecture that enables real-time, interactive communication between autonomous agents and human operators. Rather than building a traditional dashboard that polls for status updates, the Generative UI layer uses event-driven protocols that allow agents to stream their reasoning, request human input, and render rich visualizations — all in real-time.
+
+The three protocols serve complementary roles:
+
+1. **AG-UI (Agent-User Interaction Protocol)**: The transport layer — defines how agent events flow to the frontend in real-time via Server-Sent Events (SSE).
+2. **CopilotKit**: The React integration layer — provides hooks and components for building agent-aware UI with bidirectional state synchronization.
+3. **MCP Apps**: The rich visualization layer — enables tool-specific dashboards and interactive widgets rendered in sandboxed iframes.
+
+This layered approach allows the platform to support everything from simple text-based agent status updates to complex interactive visualizations, with human-in-the-loop approval flows at every level.
+
+## AG-UI Protocol
+
+The AG-UI (Agent-User Interaction) protocol is an open standard for real-time agent-to-frontend communication. It defines a structured event stream that captures the full lifecycle of agent interactions — from initial invocation through reasoning, tool usage, state changes, and completion.
+
+### Event Architecture
+
+AG-UI defines 26+ typed event categories organized into several groups:
+
+**Lifecycle Events**:
+- `RUN_STARTED` / `RUN_FINISHED` / `RUN_ERROR`: Track the overall agent workflow lifecycle
+- `STEP_STARTED` / `STEP_FINISHED`: Track individual reasoning steps within a workflow
+
+**Text Message Events**:
+- `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_END`: Stream agent text output using the `start-content-end` pattern, enabling real-time display of agent reasoning
+
+**Tool Call Events**:
+- `TOOL_CALL_START` / `TOOL_CALL_ARGS` / `TOOL_CALL_END`: Stream tool invocations with arguments, enabling the UI to show what the agent is doing in real-time
+- `TOOL_RESULT`: Return results from tool execution back to the agent (critical for human-in-the-loop flows)
+
+**State Management Events**:
+- `STATE_SNAPSHOT`: Full state dump using the `snapshot-delta` pattern — sent when an agent first connects or after a significant state change
+- `STATE_DELTA`: Incremental state updates using JSON Patch (RFC 6902) — sent for granular state changes to minimize bandwidth
+
+**Reasoning Events**:
+- `REASONING_START` / `REASONING_CONTENT` / `REASONING_END`: Stream the agent's internal reasoning process, enabling transparency into how the agent reaches its conclusions
+
+### Transport
+
+AG-UI uses HTTP + Server-Sent Events (SSE) as its primary transport. SSE was chosen over WebSockets for several reasons: it works through standard HTTP infrastructure (load balancers, proxies, CDNs), supports automatic reconnection, and provides a natural fit for the unidirectional event stream pattern. For the reverse direction (human input back to the agent), standard HTTP POST requests are used.
+
+### Ecosystem Adoption
+
+AG-UI has been adopted by major agentic frameworks including LangGraph, CrewAI, Microsoft Agent Framework, Google ADK, AWS Strands, PydanticAI, and Mastra. This broad adoption means that the devops-gollms platform can potentially integrate with agents built on any of these frameworks in the future, not just its own Temporal-based agents.
+
+## CopilotKit Integration
+
+CopilotKit provides the React component library and hooks that translate AG-UI events into interactive UI components. It bridges the gap between the low-level event stream and the high-level UI experience.
+
+### Core Hooks
+
+**`useCoAgent()`**: Establishes bidirectional state synchronization between a React component and a specific agent. Each of the five devops-gollms agents gets its own `useCoAgent` instance, allowing independent state tracking and UI rendering.
+
+```typescript
+// Auto-Triage agent state sync
+const { state, setState, run, stop } = useCoAgent({
+  name: "auto-triage",
+  initialState: {
+    alertId: null,
+    investigationPhase: "idle",
+    findings: [],
+    proposedFix: null,
+    confidence: 0,
+  },
+});
+```
+
+**`useCoAgentStateRender()`**: Registers a custom renderer that is invoked whenever the agent's state changes. This is used to render live investigation progress — as the Auto-Triage agent discovers new findings, the UI updates in real-time.
+
+```typescript
+useCoAgentStateRender({
+  name: "auto-triage",
+  render: ({ state }) => {
+    return (
+      <InvestigationTimeline
+        phase={state.investigationPhase}
+        findings={state.findings}
+        confidence={state.confidence}
+      />
+    );
+  },
+});
+```
+
+**`useCopilotAction()` + `renderAndWaitForResponse()`**: Defines actions that require human approval before the agent can proceed. When the agent triggers an action that requires approval, the UI renders an approval card and blocks the agent workflow until the human responds.
+
+```typescript
+useCopilotAction({
+  name: "deploy_fix",
+  description: "Deploy the proposed fix to production",
+  parameters: [
+    { name: "fixDescription", type: "string" },
+    { name: "affectedServices", type: "string[]" },
+    { name: "riskLevel", type: "string" },
+  ],
+  renderAndWaitForResponse: ({ args, respond }) => {
+    return (
+      <ApprovalCard
+        title="Deploy Fix to Production"
+        description={args.fixDescription}
+        services={args.affectedServices}
+        risk={args.riskLevel}
+        onApprove={() => respond({ approved: true })}
+        onReject={(reason) => respond({ approved: false, reason })}
+      />
+    );
+  },
+});
+```
+
+### Multiple CoAgents
+
+Each of the five devops-gollms agents operates as an independent CoAgent with its own state, UI panel, and event stream. The dashboard renders all active agents simultaneously, with each agent's panel showing its current status, recent actions, and any pending approval requests. Users can expand or collapse individual agent panels and drill into detailed views for active investigations.
+
+## Temporal-to-AG-UI Adapter
+
+Since the devops-gollms agents run as Temporal workflows rather than on a framework with native AG-UI support, a custom adapter layer translates Temporal workflow events into AG-UI events. This adapter is a thin Go service that:
+
+- **Subscribes to Temporal workflow events** via the Temporal SDK's workflow event listener
+- **Emits `RUN_STARTED` / `RUN_FINISHED`** when workflows start and complete
+- **Emits `STATE_SNAPSHOT` / `STATE_DELTA`** when workflow state changes (by comparing consecutive workflow query results and generating JSON Patches)
+- **Emits `TOOL_CALL_START` / `TOOL_CALL_ARGS` / `TOOL_CALL_END`** when agent activities (tool invocations) are scheduled and completed
+- **Receives `TOOL_RESULT`** from the frontend for human-approval flows and forwards them as Temporal signals to the waiting workflow
+
+This adapter pattern allows the platform to benefit from AG-UI's rich event model and CopilotKit's React components while retaining Temporal's durable execution guarantees for the agent workflows themselves.
+
+## MCP Apps for Rich Tool UIs
+
+MCP (Model Context Protocol) Apps extend the UI layer with rich, tool-specific visualizations that go beyond what standard React components can provide. MCP Apps are sandboxed iframe-based applications that render within the agent dashboard or within AI chat clients.
+
+### Architecture
+
+Each MCP App is a self-contained HTML/JS application that communicates with the host application through an intent-based messaging protocol (following the Shopify pattern). The host sends data and configuration to the iframe via `postMessage`, and the iframe renders the visualization and sends user interactions back via `postMessage`.
+
+### Tool-Specific Dashboards
+
+- **Triage Timeline**: An interactive timeline visualization showing the Auto-Triage agent's investigation steps, with expandable details for each finding, log excerpt, and metric anomaly.
+- **Diff Viewer**: A side-by-side diff visualization for the Mirror (test generation) and Janitor (refactoring) agents, showing proposed code changes with syntax highlighting and inline comments.
+- **CI Pipeline Visualizer**: A DAG visualization of CI/CD pipeline stages for the Gatekeeper agent, showing security scan results, test outcomes, and approval gates.
+- **Dependency Graph Explorer**: An interactive graph visualization (using D3.js or similar) showing the service dependency graph from the Context Engine's Knowledge Graph, with the ability to highlight affected services and trace incident blast radius.
+
+### Security
+
+MCP Apps run in sandboxed iframes with restricted capabilities: no access to the parent page's DOM, cookies, or local storage. Communication is limited to the intent-based messaging protocol, and all HTML templates are pre-reviewed and served from a trusted origin. Content Security Policy (CSP) headers prevent inline script execution and limit resource loading to approved domains.
+
+## Three-Tier Generative UI Model
+
+The UI layer implements a three-tier model that provides increasing levels of flexibility and richness:
+
+### Tier 1: Template (Pre-Built Agent Panels)
+
+Pre-designed React components for common agent UI patterns: status cards, timeline views, log viewers, metric charts, and approval cards. These components are parameterized by agent state and render consistently across all agents. Development effort is minimal — agents simply update their state, and the template components render the appropriate UI.
+
+### Tier 2: Declarative (A2UI-Style Dynamic Composition)
+
+For more complex visualizations that do not fit into pre-built templates, agents can declaratively specify UI layouts using a JSON schema. The UI runtime interprets the schema and dynamically composes React components. This allows agents to create custom visualizations without requiring frontend code changes, following the A2UI (Agent-to-UI) pattern where the agent's output includes both data and presentation hints.
+
+### Tier 3: Open-Ended (MCP Apps)
+
+For the richest and most interactive visualizations — interactive graphs, complex data explorers, domain-specific tools — MCP Apps provide a fully flexible rendering surface. These are developed as standalone web applications and integrated via the iframe/messaging protocol. This tier requires the most development effort but provides unlimited visualization capabilities.
+
+## Human-in-the-Loop Architecture
+
+Human-in-the-loop (HITL) approval flows are a critical safety mechanism for the devops-gollms platform. When an agent proposes a high-risk action (deploying a fix, merging a PR, modifying infrastructure), the workflow pauses and waits for human approval before proceeding.
+
+```mermaid
+sequenceDiagram
+    participant A as Agent Workflow
+    participant T as Temporal
+    participant AGUI as AG-UI Adapter
+    participant UI as React Frontend
+    participant H as Human Operator
+
+    A->>T: Request approval
+    T->>T: workflow.wait_for_signal("approval")
+    T->>AGUI: Emit ToolCallStart("request_approval")
+    AGUI->>UI: SSE: TOOL_CALL_START event
+    UI->>H: Render approval card
+    H->>UI: Approve / Reject
+    UI->>AGUI: TOOL_RESULT response
+    AGUI->>T: Send signal("approval", result)
+    T->>A: Resume workflow
+```
+
+The HITL flow leverages Temporal's signal/wait mechanism for durability. If the UI disconnects or the user takes hours to respond, the Temporal workflow remains paused in a durable state — it will not lose the pending approval request. When the user eventually responds, the signal is delivered and the workflow resumes exactly where it left off.
+
+Approval decisions are logged to the Context Engine's Knowledge Graph as episodic memory, allowing agents to learn which types of proposals tend to be approved or rejected, and to adjust their confidence thresholds accordingly.
+
+## Per-Agent UI Mapping
+
+Each agent has a primary set of UI components tailored to its workflow and output types:
+
+| Agent | Primary UI Components |
+|-------|----------------------|
+| Auto-Triage | Timeline visualization, log viewer, metric charts, root cause tree |
+| Mirror | Test coverage heatmap, mutation score dashboard, test diff viewer |
+| Scaffolder | Project structure tree, dependency graph, security baseline checklist |
+| Janitor | Code smell heatmap, refactoring diff viewer, debt trend charts |
+| Gatekeeper | Security audit report, compliance checklist, approval cards, SBOM viewer |
+
+All agents share common UI components: status cards (showing current phase, confidence level, and elapsed time), action logs (scrolling list of recent agent actions), and notification badges (for pending approvals or errors). The dashboard provides a unified view where operators can monitor all five agents simultaneously and drill into any individual agent's detailed view.
+
+
 # Technology Stack Evaluation: Build vs. Buy for Agentic Systems
 
 ## Introduction
@@ -1308,6 +1886,26 @@ This recommendation is based on the following rationale:
 
 In conclusion, a hybrid approach that combines the durability and scalability of Temporal with the control and security of a custom-built agentic framework is the optimal choice for a cybersecurity company like Abnormal.AI. This approach provides the best of both worlds, allowing for the creation of reliable, scalable, and secure agentic systems that can be trusted with mission-critical tasks.
 
+### Context Engine and UI Technologies
+
+Beyond the core agentic framework and orchestration layer, the devops-gollms platform requires a set of supporting technologies for context management and user interaction. The following table evaluates the production readiness and role of each technology selected for the Context Engine and Generative UI layers:
+
+| Category | Technology | Role | Production Readiness |
+|----------|-----------|------|---------------------|
+| Knowledge Graph | Neo4j 5.x + Graphiti | Service topology, dependency tracking, temporal bi-tracking | Very High |
+| Vector Store | pgvector | Semantic search (shared PostgreSQL instance) | High |
+| Indexing Pipeline | CocoIndex | Incremental multi-target synchronization | Medium-High |
+| Event Streaming | NATS JetStream | Real-time events, cache invalidation | Very High |
+| Data Interchange | Apache Arrow / Flight | Zero-copy Go-to-Python IPC | High |
+| UI Protocol | AG-UI | Agent-to-frontend event streaming | High |
+| UI Framework | CopilotKit | React agent UI components | High |
+| Tool UIs | MCP Apps | Sandboxed iframe visualizations | Medium-High |
+| Context Reasoning | RLM (rlms) | Recursive context decomposition | Medium |
+
+**Neo4j** and **NATS JetStream** are rated "Very High" for production readiness — both are battle-tested technologies with years of production deployments at scale. **pgvector** and **Apache Arrow** are rated "High" — they are mature and widely adopted, though pgvector's HNSW indexing performance should be benchmarked against the expected embedding volume. **CocoIndex** and **MCP Apps** are rated "Medium-High" — they are newer technologies with growing adoption but less production history. **RLM** is rated "Medium" — the research is compelling and the library is functional, but it has not yet been validated at enterprise scale in production environments.
+
+The key architectural decision is to consolidate where possible (pgvector shares the PostgreSQL instance with the structured store, reducing operational burden) while accepting purpose-built tools where their capabilities justify the added complexity (Neo4j for graph traversals, NATS for event streaming, Arrow for cross-language data interchange).
+
 ## Conclusion
 
 The landscape of agentic AI is evolving at a breakneck pace, with new frameworks and tools emerging on a regular basis. The decision of whether to build a custom solution or buy into an existing ecosystem is a complex one, with no one-size-fits-all answer. For a cybersecurity company like Abnormal.AI, where reliability, security, and control are paramount, a hybrid approach that combines the durability of Temporal.io with the flexibility and control of a custom-built agentic framework is the most prudent path forward. This approach allows for the creation of enterprise-grade agentic systems that are not only powerful and intelligent but also reliable, scalable, and secure. As the field of agentic AI continues to mature, it will be essential to continuously evaluate the latest technologies and adapt the technology stack to meet the evolving needs of the business.
@@ -1359,9 +1957,47 @@ The level of human involvement in an agentic system is a critical design decisio
 
 The theoretical risks of agentic AI are well-documented, but it is the real-world failures that provide the most valuable lessons. In a widely publicized incident, a chatbot operated by the delivery company DPD was tricked into writing a poem about how useless the company was. A South Korean bank suffered a significant financial loss due to a malfunction in its AI-powered foreign exchange trading system. A global outage of Cloudflare services was attributed to a bug in an AI-powered networking system. These incidents highlight the importance of human oversight, robust testing and validation, and transparency and explainability in AI systems. In almost all reported incidents of AI failure, the lack of adequate human oversight was a contributing factor. Humans must be kept in the loop, especially for high-risk tasks, to provide a critical safety check and to intervene when things go wrong. AI systems must be rigorously tested and validated in a realistic environment before they are deployed to production. When an AI system fails, it is crucial to be able to understand why it failed, which requires a high degree of transparency and explainability in the system's design.
 
+## 11. Context Engine Risks
+
+**Graph Data Staleness**: The Knowledge Graph may fall out of sync with reality if webhook delivery fails or CocoIndex pipelines lag. Mitigation: Health-check monitors that compare KG state against source-of-truth systems; NATS durable subscriptions with replay on reconnect; staleness TTLs on graph nodes.
+
+**RLM Cost Unpredictability**: The RLM engine allows the LLM to decide how many sub-calls to make, with no built-in budget enforcement. Mitigation: Implement a `max_cost` wrapper that tracks API spend per request and forces early termination; route through RLM only when assembled context exceeds 50K tokens; use cost-tiered model routing.
+
+**Multi-Store Consistency**: With data spread across Neo4j, pgvector, and PostgreSQL, there is risk of inconsistent reads during concurrent updates. Mitigation: Event-sourced writes through NATS ensure ordering; version vectors on graph nodes; eventual consistency with bounded staleness guarantees.
+
+## 12. UI Layer Risks
+
+**AG-UI Protocol Evolution**: As a relatively new protocol (May 2025), AG-UI event types are still expanding. Mitigation: Abstract AG-UI behind an internal adapter layer; pin to specific protocol versions; contribute to specification.
+
+**CopilotKit Version Churn**: Active development means breaking changes between versions. Mitigation: Pin major versions; maintain an internal adapter layer between CopilotKit hooks and application components.
+
+**MCP Apps Security Surface**: Sandboxed iframes rendering tool-provided HTML create a potential XSS vector if sandbox restrictions are misconfigured. Mitigation: Strict CSP headers; pre-review HTML templates; limit MCP App capabilities to declared intents.
+
 ## Conclusion
 
 Agentic AI systems hold immense promise, but their deployment in production environments must be approached with a healthy dose of caution and a deep understanding of the potential risks. The failure modes discussed in this paper are not theoretical; they are real-world challenges that have already been encountered in production systems. By implementing the mitigation strategies outlined in this paper, we can build agentic systems that are not only powerful and autonomous but also safe, reliable, and worthy of our trust. The key to success lies in a multi-layered approach that combines robust architectural patterns, rigorous testing and validation, and a strong emphasis on human oversight.
+
+### Extended Roadmap: Context Engine and UI Layer
+
+The following phases extend the initial 90-day agent development roadmap with the Context Engine and Generative UI infrastructure required to bring the platform to full operational capability.
+
+**Phase 4: Context Engine Foundation (Days 91-120)**
+
+- Weeks 13-14: Neo4j cluster deployment and schema design for service topology; pgvector extension deployment on existing PostgreSQL instance; CocoIndex pipeline for GitHub webhook ingestion (push events, PR events, deployment events)
+- Weeks 15-16: Context Graph API (Go/gRPC) with query planner and initial backend connectors; NATS JetStream cluster deployment with durable subscriptions for all event subjects
+- Weeks 17-18: Redis L2 cache layer with TTL and event-driven invalidation; basic agent integration where Auto-Triage reads incident context from the Context Engine instead of gathering it ad-hoc
+
+**Phase 5: Context Engine Maturation (Days 121-150)**
+
+- Weeks 19-20: CocoIndex pipelines for Sentry issue events, PagerDuty incident events, and CI/CD pipeline events; full event-driven data flow with cache invalidation across all event types
+- Weeks 21-22: RLM integration for Auto-Triage and Janitor agents; Docker-sandboxed REPL environments with persistent mode for iterative workflows; cost-tiered model routing configuration
+- Weeks 23-24: Apache Arrow Flight for metrics interchange between Go Context API and Python RLM engine; TimescaleDB hypertables for time-series operational data; performance benchmarking and query optimization
+
+**Phase 6: Generative UI Layer (Days 151-180)**
+
+- Weeks 25-26: AG-UI protocol adapter for Temporal workflows; CopilotKit scaffold with `useCoAgent` hooks for each of the five agents; basic SSE event streaming from adapter to React frontend
+- Weeks 27-28: Agent dashboard panels — Auto-Triage investigation timeline, Gatekeeper approval cards, Janitor refactoring diff viewer; human-in-the-loop approval flows with Temporal signal/wait integration
+- Weeks 29-30: MCP Apps for rich tool UIs — dependency graph explorer, CI pipeline visualizer, test coverage heatmap; three-tier generative UI model integration; production deployment with monitoring and observability
 
 ## References
 

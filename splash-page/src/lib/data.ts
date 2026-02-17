@@ -402,6 +402,11 @@ export const riskMatrix = [
   { risk: "Cost Explosion (Token Usage)", severity: "High", likelihood: "Medium", mitigation: "Per-task cost ceilings ($5-$10), tiered model strategy, caching, dashboards." },
   { risk: "Security Breach via Agent", severity: "Critical", likelihood: "Low", mitigation: "Least privilege, sandbox isolation, no production write access, audit logging." },
   { risk: "Supply Chain Attack (Slopsquatting)", severity: "Critical", likelihood: "Medium", mitigation: "Dependency allowlist, package verification, SBOM generation." },
+  { risk: "Graph Data Staleness", severity: "High", likelihood: "Medium", mitigation: "Health-check monitors vs source-of-truth; NATS durable subscriptions with replay; staleness TTLs on graph nodes." },
+  { risk: "RLM Cost Unpredictability", severity: "High", likelihood: "Medium", mitigation: "max_cost wrapper with spend tracking; RLM only for >50K token contexts; cost-tiered model routing." },
+  { risk: "Multi-Store Consistency", severity: "Medium", likelihood: "Medium", mitigation: "Event-sourced writes through NATS for ordering; version vectors on graph nodes; bounded staleness guarantees." },
+  { risk: "AG-UI Protocol Evolution", severity: "Medium", likelihood: "High", mitigation: "Internal adapter abstraction layer; pin to specific protocol versions; contribute to specification." },
+  { risk: "CopilotKit Version Churn", severity: "Low", likelihood: "High", mitigation: "Pin major versions; maintain adapter layer between CopilotKit hooks and application components." },
 ];
 
 export const roadmap = [
@@ -420,6 +425,21 @@ export const roadmap = [
     { week: "10-11", milestone: "Auto-Triage Fix Generation", deliverable: "Sandbox-based fix gen, PR creation for simple fixes" },
     { week: "11-12", milestone: "Scaffolder Agent MVP", deliverable: "Python/FastAPI scaffolding, Terraform, security baselines" },
   ]},
+  { phase: "Phase 4: Context Engine Foundation", days: "Days 91-120", milestones: [
+    { week: "13-14", milestone: "Context Stores Deployment", deliverable: "Neo4j cluster + pgvector extension; CocoIndex pipeline for GitHub webhooks" },
+    { week: "15-16", milestone: "Context Graph API", deliverable: "Go/gRPC query planner + context assembler; NATS JetStream cluster" },
+    { week: "17-18", milestone: "Agent Integration", deliverable: "Redis L2 cache; Auto-Triage reads from Context Engine" },
+  ]},
+  { phase: "Phase 5: Context Engine Maturation", days: "Days 121-150", milestones: [
+    { week: "19-20", milestone: "Full Event-Driven Flow", deliverable: "CocoIndex pipelines for Sentry, PagerDuty, CI/CD events" },
+    { week: "21-22", milestone: "RLM Integration", deliverable: "RLM for Auto-Triage and Janitor; Docker-sandboxed REPL environments" },
+    { week: "23-24", milestone: "Analytics Pipeline", deliverable: "Apache Arrow Flight for metrics; TimescaleDB hypertables" },
+  ]},
+  { phase: "Phase 6: Generative UI Layer", days: "Days 151-180", milestones: [
+    { week: "25-26", milestone: "AG-UI + CopilotKit Scaffold", deliverable: "Temporal-to-AG-UI adapter; useCoAgent per agent" },
+    { week: "27-28", milestone: "Agent Dashboards", deliverable: "Triage timeline, Gatekeeper approval cards, HITL flows" },
+    { week: "29-30", milestone: "MCP Apps + Production", deliverable: "Rich tool UIs, three-tier generative UI model, production deployment" },
+  ]},
 ];
 
 export const successMetrics = [
@@ -430,12 +450,472 @@ export const successMetrics = [
   { metric: "Dependency Currency", baseline: "60% up-to-date", target: "95% up-to-date", agent: "Janitor" },
 ];
 
+// ============================================================
+// Context Engine
+// ============================================================
+
+export interface ContextSubsystem {
+  id: string;
+  name: string;
+  technology: string;
+  color: string;
+  icon: string;
+  description: string;
+  role: string;
+  justification: string;
+}
+
+export const contextEngine = {
+  title: "Platform-Core Context Engine",
+  subtitle: "Unified Context Substrate for All Five Agents",
+  description:
+    "The Context Engine is the central nervous system of the platform — a living, continuously-updated representation of the entire engineering organization's state. Rather than each agent independently gathering context from disparate sources, the Context Engine maintains a unified knowledge layer spanning code, infrastructure, incidents, deployments, team topology, and operational history.",
+  mermaidArchitecture: `graph TB
+    subgraph External["External Systems"]
+        GH[GitHub]
+        SENTRY[Sentry]
+        PD[PagerDuty]
+        CLOUD[AWS / Cloud]
+        CICD[CI/CD Pipelines]
+    end
+
+    subgraph Ingestion["Ingestion Layer"]
+        WH[Webhook Gateway]
+        COCO[CocoIndex Pipeline]
+    end
+
+    subgraph Engine["Context Engine"]
+        API[Context Graph API\\nGo / gRPC]
+        QP[Query Planner]
+        CA[Context Assembler]
+
+        subgraph Stores["Data Stores"]
+            NEO[Neo4j 5.x + Graphiti\\nKnowledge Graph]
+            PGV[pgvector\\nVector Store]
+            PG[PostgreSQL + TimescaleDB\\nStructured Store]
+            REDIS[Redis\\nContext Cache L2]
+        end
+
+        subgraph Events["Event Infrastructure"]
+            NATS[NATS JetStream\\nEvent Bus]
+        end
+
+        subgraph IPC["Data Interchange"]
+            ARROW[Apache Arrow / Flight\\nGo-Python Zero-Copy]
+        end
+    end
+
+    subgraph AgentLayer["Agent Layer"]
+        AT[Auto-Triage]
+        MI[Mirror]
+        SC[Scaffolder]
+        JA[Janitor]
+        GK[Gatekeeper]
+    end
+
+    External --> WH
+    WH --> NATS
+    NATS --> COCO
+    COCO --> NEO
+    COCO --> PGV
+    COCO --> PG
+
+    API --> QP
+    QP --> CA
+    CA --> NEO
+    CA --> PGV
+    CA --> PG
+    CA --> REDIS
+    CA --> ARROW
+
+    NATS --> API
+
+    AgentLayer --> API
+    API --> AgentLayer`,
+  mermaidDataFlow: `sequenceDiagram
+    participant GH as GitHub
+    participant WH as Webhook Gateway
+    participant NATS as NATS JetStream
+    participant COCO as CocoIndex
+    participant NEO as Neo4j
+    participant PGV as pgvector
+    participant PG as PostgreSQL
+    participant REDIS as Redis
+    participant AT as Auto-Triage Agent
+
+    GH->>WH: Push event / PR opened
+    WH->>NATS: Publish event
+    par Store Updates
+        NATS->>COCO: Trigger indexing
+        COCO->>NEO: Update knowledge graph
+        COCO->>PGV: Update embeddings
+        COCO->>PG: Update structured records
+    and Cache Invalidation
+        NATS->>REDIS: Invalidate affected keys
+    and Agent Triggers
+        NATS->>AT: Notify relevant agents
+    end`,
+};
+
+export const contextEngineSubsystems: ContextSubsystem[] = [
+  {
+    id: "knowledge-graph",
+    name: "Knowledge Graph",
+    technology: "Neo4j 5.x + Graphiti",
+    color: "#22d3ee",
+    icon: "graph",
+    description:
+      "Service topology, dependency tracking, team ownership, incident relationships, and temporal bi-tracking via Graphiti for agent episodic memory.",
+    role: "Answers 'what entities are related?' via traversal-based context discovery",
+    justification:
+      "Industry-standard graph DB with GDS library; Graphiti adds temporal bi-tracking and episodic memory for agents.",
+  },
+  {
+    id: "vector-store",
+    name: "Vector Store",
+    technology: "pgvector (PostgreSQL)",
+    color: "#a78bfa",
+    icon: "search",
+    description:
+      "Semantic similarity search over code, documentation, runbooks, and past incidents using HNSW indexes on the shared PostgreSQL instance.",
+    role: "Answers 'what content is semantically similar?' via embedding-based retrieval",
+    justification:
+      "Single PostgreSQL instance for both structured + vector data; HNSW indexes; avoids additional operational burden.",
+  },
+  {
+    id: "structured-store",
+    name: "Structured Store",
+    technology: "PostgreSQL + TimescaleDB",
+    color: "#2dd4bf",
+    icon: "database",
+    description:
+      "Operational records, deployment metadata, configuration state, and time-series metrics via TimescaleDB hypertables.",
+    role: "Provides exact-match queries for deployment records, metrics, and configuration",
+    justification:
+      "Battle-tested relational DB; TimescaleDB hypertables for time-series; same instance as pgvector.",
+  },
+  {
+    id: "indexing-pipeline",
+    name: "Indexing Pipeline",
+    technology: "CocoIndex",
+    color: "#fbbf24",
+    icon: "refresh",
+    description:
+      "Incremental processing pipeline that synchronizes data from external sources into all stores — Neo4j, pgvector, and PostgreSQL.",
+    role: "Keeps all stores synchronized with source-of-truth systems",
+    justification:
+      "Incremental processing; multi-target export (Neo4j + pgvector + PG); Rust performance core.",
+  },
+  {
+    id: "event-streaming",
+    name: "Event Streaming",
+    technology: "NATS JetStream",
+    color: "#34d399",
+    icon: "radio",
+    description:
+      "Real-time event bus for webhook ingestion, agent notifications, cache invalidation, and inter-agent coordination via durable streams.",
+    role: "Provides real-time event distribution and durable message delivery",
+    justification:
+      "Lightweight; Go-native; request/reply pattern; durable streams; low operational overhead vs Kafka.",
+  },
+  {
+    id: "data-interchange",
+    name: "Data Interchange",
+    technology: "Apache Arrow / Flight",
+    color: "#f472b6",
+    icon: "arrows",
+    description:
+      "Zero-copy Go-to-Python data interchange for metrics and time-series data. Used selectively for large analytical payloads.",
+    role: "Eliminates serialization overhead for cross-language data transfer",
+    justification:
+      "Zero-copy IPC between Go and Python; columnar format ideal for time-series; selective use for large payloads.",
+  },
+  {
+    id: "context-cache",
+    name: "Context Cache",
+    technology: "Redis",
+    color: "#ef4444",
+    icon: "zap",
+    description:
+      "Low-latency L2 cache for assembled context payloads with TTL-based expiry and event-driven invalidation via NATS subscriptions.",
+    role: "Reduces repeated context assembly cost with sub-millisecond reads",
+    justification:
+      "Industry-standard cache; TTL + event-driven invalidation; sub-ms latency for hot context.",
+  },
+  {
+    id: "rlm-engine",
+    name: "RLM Reasoning Engine",
+    technology: "Python (rlms library)",
+    color: "#818cf8",
+    icon: "brain",
+    description:
+      "Recursive Language Model engine that decomposes unbounded context into manageable sub-LLM calls, mitigating context rot at scale.",
+    role: "Enables agents to reason over assembled context at arbitrary scale without degradation",
+    justification:
+      "MIT-licensed; recursive decomposition; custom tools injection; Docker sandboxing for production.",
+  },
+];
+
+// ============================================================
+// RLM Innovation
+// ============================================================
+
+export const rlmInnovation = {
+  title: "RLM-Inspired Context Management",
+  subtitle: "Key Innovation: Recursive Decomposition for Unbounded Context",
+  description:
+    "The Recursive Language Model (RLM) approach from Zhang & Kraska (arXiv:2512.24601) provides the core innovation for the Context Engine's ability to handle unbounded context without degradation. Rather than feeding assembled context directly into an LLM's token window, RLM treats context as an external environment variable accessible through a Python REPL.",
+  howItWorks:
+    "The root LLM never sees the full context. Instead, it writes Python code to inspect, filter, partition, and process context through sub-LLM calls. This creates a recursive tree of bounded-context LLM invocations where each call operates on a manageable subset.",
+  strategies: [
+    {
+      name: "Peeking",
+      description: "Examine the first portion of context to understand structure, format, and length before deciding on a decomposition strategy.",
+    },
+    {
+      name: "Grepping",
+      description: "Use regex/keyword filtering to narrow the search space before launching semantic processing on relevant subsets.",
+    },
+    {
+      name: "Partition + Map",
+      description: "Chunk context uniformly and launch parallel sub-LLM calls on each chunk for concurrent analysis.",
+    },
+    {
+      name: "Iterative Summarization",
+      description: "Chunk by semantic boundaries, summarize each chunk, then aggregate summaries into a coherent whole.",
+    },
+    {
+      name: "Variable Stitching",
+      description: "Store sub-call outputs in REPL variables and build the final answer programmatically through code.",
+    },
+  ],
+  contextRotMitigation:
+    "Context rot — the degradation in accuracy as context length increases — is mitigated because each individual LLM call operates on a manageable subset. The root LLM's context grows slowly, containing only its reasoning trace and truncated code execution results.",
+  divisionOfLabor: [
+    { layer: "Knowledge Graph", responsibility: "What entities are related?" },
+    { layer: "Vector Store", responsibility: "What content is semantically similar?" },
+    { layer: "RLM Engine", responsibility: "How to reason over all assembled context without degradation?" },
+  ],
+  benchmarks: [
+    { benchmark: "OOLONG (132K)", contextSize: "132K tokens", baseModel: "GPT-5: 44%", rlm: "RLM(GPT-5-mini)", improvement: "+114%" },
+    { benchmark: "BrowseComp+", contextSize: "~10M tokens", baseModel: "GPT-5: ~0%", rlm: "RLM(GPT-5): 91-100%", improvement: "Enabling" },
+    { benchmark: "OOLONG-Pairs", contextSize: "Quadratic", baseModel: "GPT-5: 0.04%", rlm: "RLM: 58%", improvement: "1450x" },
+    { benchmark: "CodeQA", contextSize: "Large", baseModel: "GPT-5: 24%", rlm: "RLM: 62%", improvement: "+158%" },
+  ],
+};
+
+// ============================================================
+// Generative UI Layer
+// ============================================================
+
+export interface UIFramework {
+  name: string;
+  type: string;
+  description: string;
+  generativeUI: string;
+  hitl: string;
+  multiAgent: string;
+  temporalIntegration: string;
+  maturity: string;
+  color: string;
+}
+
+export const uiLayer = {
+  title: "Generative UI / UX Layer",
+  subtitle: "AG-UI Protocol + CopilotKit + MCP Apps",
+  description:
+    "The UI layer implements a three-protocol architecture: AG-UI for real-time agent-to-frontend communication, CopilotKit for React-based agent UI components, and MCP Apps for rich tool-specific visualizations in AI chat clients.",
+  mermaidArchitecture: `graph TB
+    subgraph Frontend["React Frontend - CopilotKit"]
+        SIDE[CopilotSidebar]
+        TRIAGE_P[Auto-Triage Panel\\nuseCoAgent]
+        MIRROR_P[Mirror Panel\\nuseCoAgent]
+        SCAFFOLD_P[Scaffolder Panel\\nuseCoAgent]
+        JANITOR_P[Janitor Panel\\nuseCoAgent]
+        GATE_P[Gatekeeper Panel\\nuseCoAgent]
+    end
+
+    subgraph Protocol["AG-UI Transport Layer"]
+        SSE[SSE Event Stream]
+        EVENTS[Typed Events:\\nLifecycle / Text / ToolCall\\nState / Reasoning]
+    end
+
+    subgraph Adapter["Temporal-to-AG-UI Adapter"]
+        RUN[RUN_STARTED / FINISHED]
+        STATE[STATE_SNAPSHOT / DELTA]
+        TOOL[TOOL_CALL_START / ARGS / END]
+        RESULT[TOOL_RESULT receiver]
+    end
+
+    subgraph Orchestration["Temporal.io Workflows"]
+        W1[Auto-Triage Workflow]
+        W2[Mirror Workflow]
+        W3[Scaffolder Workflow]
+        W4[Janitor Workflow]
+        W5[Gatekeeper Workflow]
+    end
+
+    subgraph MCP["MCP Apps - Rich Tool UIs"]
+        MCP1[Triage Timeline]
+        MCP2[Diff Viewer]
+        MCP3[CI Pipeline Viz]
+    end
+
+    Frontend <--> SSE
+    SSE <--> EVENTS
+    EVENTS <--> Adapter
+    Adapter <--> Orchestration
+    MCP --- Frontend`,
+  mermaidHITL: `sequenceDiagram
+    participant A as Agent Workflow
+    participant T as Temporal
+    participant AGUI as AG-UI Adapter
+    participant UI as React Frontend
+    participant H as Human Operator
+
+    A->>T: Request approval
+    T->>T: workflow.wait_for_signal("approval")
+    T->>AGUI: Emit ToolCallStart
+    AGUI->>UI: SSE: TOOL_CALL_START event
+    UI->>H: Render approval card
+    H->>UI: Approve / Reject
+    UI->>AGUI: TOOL_RESULT response
+    AGUI->>T: Send signal("approval", result)
+    T->>A: Resume workflow`,
+};
+
+export const uiFrameworks: UIFramework[] = [
+  {
+    name: "CopilotKit",
+    type: "Framework",
+    description: "Full-stack React framework for agent-native UIs, rebuilt natively on AG-UI since v1.50.",
+    generativeUI: "First-class (useCoAgentStateRender)",
+    hitl: "renderAndWaitForResponse",
+    multiAgent: "Multiple CoAgents with independent state",
+    temporalIntegration: "Custom AG-UI adapter",
+    maturity: "High",
+    color: "#22d3ee",
+  },
+  {
+    name: "AG-UI Protocol",
+    type: "Protocol",
+    description: "Open, lightweight event-based protocol standardizing agent-to-frontend communication.",
+    generativeUI: "Enables it (transport layer)",
+    hitl: "TOOL_CALL + TOOL_RESULT events",
+    multiAgent: "Multiple parallel event streams",
+    temporalIntegration: "Custom adapter (thin layer)",
+    maturity: "High",
+    color: "#a78bfa",
+  },
+  {
+    name: "MCP Apps",
+    type: "Extension",
+    description: "Official MCP extension for sandboxed iframe tool UIs in AI chat clients.",
+    generativeUI: "Yes (sandboxed iframe HTML)",
+    hitl: "Intent-based messaging (Shopify pattern)",
+    multiAgent: "N/A (tool-level)",
+    temporalIntegration: "MCP server wrapper",
+    maturity: "Medium-High",
+    color: "#fbbf24",
+  },
+  {
+    name: "Vercel AI SDK",
+    type: "SDK",
+    description: "Provider-agnostic TypeScript toolkit for streaming, tool calling, and RSC-based generative UI.",
+    generativeUI: "Yes (streamUI / RSC)",
+    hitl: "Manual (addToolResult)",
+    multiAgent: "Not built-in",
+    temporalIntegration: "Custom implementation",
+    maturity: "High",
+    color: "#2dd4bf",
+  },
+  {
+    name: "A2UI (Google)",
+    type: "Spec",
+    description: "Declarative JSON spec for agent-emitted UI components, rendered by client-side catalogs.",
+    generativeUI: "Yes (declarative JSON)",
+    hitl: "Actions in JSON payloads",
+    multiAgent: "N/A",
+    temporalIntegration: "N/A",
+    maturity: "Low-Medium",
+    color: "#f472b6",
+  },
+];
+
+export interface AgentUIMapping {
+  agentId: string;
+  agentName: string;
+  color: string;
+  components: { name: string; description: string }[];
+}
+
+export const agentUIMappings: AgentUIMapping[] = [
+  {
+    agentId: "auto-triage",
+    agentName: "Auto-Triage",
+    color: "#22d3ee",
+    components: [
+      { name: "Investigation Timeline", description: "Real-time visualization of triage steps, log analysis, and hypothesis formation" },
+      { name: "Log Viewer", description: "Filterable, searchable log stream with LLM-highlighted anomalies" },
+      { name: "Metric Charts", description: "Time-series charts for CPU, memory, error rates around incident window" },
+      { name: "Root Cause Tree", description: "Interactive causal chain from symptom to root cause" },
+    ],
+  },
+  {
+    agentId: "mirror",
+    agentName: "Mirror",
+    color: "#2dd4bf",
+    components: [
+      { name: "Coverage Heatmap", description: "Visual file-level coverage overlay showing gaps and improvements" },
+      { name: "Mutation Dashboard", description: "Mutation testing scores with surviving mutant details" },
+      { name: "Test Diff Viewer", description: "Side-by-side view of generated tests with source code context" },
+    ],
+  },
+  {
+    agentId: "scaffolder",
+    agentName: "Scaffolder",
+    color: "#fbbf24",
+    components: [
+      { name: "Project Structure Tree", description: "Interactive file tree of the generated repository structure" },
+      { name: "Dependency Graph", description: "Visual dependency map of generated infrastructure and service connections" },
+      { name: "Security Baseline Checklist", description: "Compliance status for each security control applied" },
+    ],
+  },
+  {
+    agentId: "janitor",
+    agentName: "Janitor",
+    color: "#34d399",
+    components: [
+      { name: "Code Smell Heatmap", description: "Repository-wide visualization of tech debt hotspots by severity" },
+      { name: "Refactoring Diff Viewer", description: "Before/after code comparison with semantic change annotations" },
+      { name: "Debt Trend Charts", description: "Time-series tracking of debt reduction across repositories" },
+    ],
+  },
+  {
+    agentId: "gatekeeper",
+    agentName: "Gatekeeper",
+    color: "#f472b6",
+    components: [
+      { name: "Security Audit Report", description: "Structured findings by severity with OWASP mapping and remediation guidance" },
+      { name: "Compliance Checklist", description: "SOC 2 / FedRAMP control mapping with pass/fail status" },
+      { name: "Approval Cards", description: "Human-in-the-loop approval UI with context, diff preview, and one-click actions" },
+      { name: "SBOM Viewer", description: "Software Bill of Materials with vulnerability cross-reference" },
+    ],
+  },
+];
+
+// ============================================================
+// Updated Table of Contents, Roadmap, Risk Matrix
+// ============================================================
+
 export const tocSections = [
   { id: "executive-summary", label: "Executive Summary", number: "01" },
   { id: "pain-points", label: "Pain Points", number: "02" },
   { id: "agents", label: "The Five Agents", number: "03" },
-  { id: "implementation", label: "Build vs. Buy", number: "04" },
-  { id: "risks", label: "Risk Assessment", number: "05" },
-  { id: "roadmap", label: "90-Day Roadmap", number: "06" },
-  { id: "references", label: "References", number: "07" },
+  { id: "context-engine", label: "Context Engine", number: "04" },
+  { id: "generative-ui", label: "Generative UI", number: "05" },
+  { id: "implementation", label: "Build vs. Buy", number: "06" },
+  { id: "risks", label: "Risk Assessment", number: "07" },
+  { id: "roadmap", label: "Roadmap", number: "08" },
+  { id: "references", label: "References", number: "09" },
 ];
