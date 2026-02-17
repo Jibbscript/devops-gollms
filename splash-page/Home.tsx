@@ -1,14 +1,17 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import {
-  AlertTriangle, ArrowRight, BookOpen, Calendar, ChevronRight,
-  ExternalLink, Layers, Menu, Shield, Target, X, Zap
+  AlertTriangle, ArrowRight, BookOpen, Brain, Calendar,
+  Database, ExternalLink, Layers, Menu, Monitor, Shield,
+  Target, X, Zap
 } from "lucide-react";
 import AgentCard from "@/components/AgentCard";
 import MermaidDiagram from "@/components/MermaidDiagram";
 import {
   agents, painPoints, frameworkComparison, riskMatrix,
-  roadmap, successMetrics, tocSections, IMAGES
+  roadmap, successMetrics, tocSections, IMAGES,
+  contextEngine, contextEngineSubsystems, rlmInnovation,
+  uiLayer, uiFrameworks, agentUIMappings,
 } from "@/lib/data";
 
 function SeverityBadge({ level }: { level: string }) {
@@ -138,9 +141,10 @@ export default function Home() {
               <span className="text-primary">DevEx Architecture</span>
             </h1>
             <p className="text-lg text-foreground/70 max-w-2xl leading-relaxed mb-8">
-              Five autonomous AI agents designed to eliminate friction in the
-              Plan → Code → Test lifecycle for Abnormal.AI's Python/Go/AWS-native
-              engineering organization.
+              Five autonomous AI agents powered by a unified Context Engine and
+              Generative UI layer — designed to eliminate friction in the
+              Plan → Code → Test lifecycle for Python/Go/AWS-native
+              engineering organizations.
             </p>
             <div className="flex flex-wrap gap-3">
               <button
@@ -172,8 +176,10 @@ export default function Home() {
                 The central thesis of this dossier is that the primary bottleneck in modern software engineering
                 is no longer code generation — which is largely solved by current-generation LLMs — but rather
                 <strong className="text-foreground"> context integration, deterministic validation, and safe execution</strong>.
-                The "Agentic" layer proposed here sits between the developer's intent and the CI/CD pipeline,
-                functioning as a sandboxed operating system for engineering workflows.
+                The platform architecture comprises three layers: <strong className="text-foreground">five autonomous agents</strong> for
+                workflow automation, a <strong className="text-foreground">Context Engine</strong> (Knowledge Graph + Vector Store +
+                RLM reasoning) providing unified context, and a <strong className="text-foreground">Generative UI layer</strong> (AG-UI +
+                CopilotKit + MCP Apps) for real-time human-agent interaction.
               </p>
             </div>
 
@@ -285,9 +291,313 @@ export default function Home() {
           </div>
         </section>
 
+        {/* Context Engine */}
+        <section id="context-engine">
+          <SectionHeader number="04" title="Platform-Core Context Engine" />
+          <div className="space-y-8">
+            {/* Overview */}
+            <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-6">
+              <div className="flex items-start gap-3 mb-4">
+                <Database className="w-5 h-5 text-cyan-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <h3 className="text-sm font-display font-semibold text-cyan-400 mb-1">{contextEngine.subtitle}</h3>
+                  <p className="text-sm leading-relaxed text-foreground/80">{contextEngine.description}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Architecture Diagram */}
+            <div>
+              <h3 className="text-sm font-display font-semibold text-foreground mb-3">Context Graph Architecture</h3>
+              <MermaidDiagram chart={contextEngine.mermaidArchitecture} title="Context Engine — System Architecture" />
+            </div>
+
+            {/* Subsystem Cards */}
+            <div>
+              <h3 className="text-sm font-display font-semibold text-foreground mb-4">Core Subsystems</h3>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {contextEngineSubsystems.map((sub) => (
+                  <motion.div
+                    key={sub.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    className="rounded-lg border border-border/30 bg-card/50 p-4"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: sub.color }} />
+                      <span className="text-sm font-medium text-foreground">{sub.name}</span>
+                    </div>
+                    <span
+                      className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded mb-2 inline-block"
+                      style={{ color: sub.color, backgroundColor: `${sub.color}15` }}
+                    >
+                      {sub.technology}
+                    </span>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{sub.description}</p>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+
+            {/* RLM Innovation */}
+            <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-6">
+              <div className="flex items-start gap-3 mb-4">
+                <Brain className="w-5 h-5 text-violet-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <h3 className="text-sm font-display font-semibold text-violet-400 mb-1">{rlmInnovation.subtitle}</h3>
+                  <p className="text-sm leading-relaxed text-foreground/80 mb-3">{rlmInnovation.description}</p>
+                  <p className="text-xs text-foreground/70 leading-relaxed mb-4">{rlmInnovation.howItWorks}</p>
+                </div>
+              </div>
+
+              <h4 className="text-xs font-display font-semibold text-foreground mb-3">Five Emergent Strategies</h4>
+              <div className="grid gap-2 mb-6">
+                {rlmInnovation.strategies.map((s, i) => (
+                  <div key={i} className="flex items-start gap-3 rounded-lg border border-border/20 bg-secondary/20 p-3">
+                    <span className="text-[10px] font-mono font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded mt-0.5">
+                      {i + 1}
+                    </span>
+                    <div>
+                      <span className="text-xs font-medium text-foreground">{s.name}</span>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{s.description}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <h4 className="text-xs font-display font-semibold text-foreground mb-3">Division of Labor</h4>
+              <div className="grid sm:grid-cols-3 gap-3 mb-6">
+                {rlmInnovation.divisionOfLabor.map((d, i) => (
+                  <div key={i} className="rounded-lg border border-border/20 bg-secondary/20 p-3 text-center">
+                    <p className="text-[10px] font-mono text-violet-400 mb-1">{d.layer}</p>
+                    <p className="text-xs text-foreground/80">{d.responsibility}</p>
+                  </div>
+                ))}
+              </div>
+
+              <h4 className="text-xs font-display font-semibold text-foreground mb-3">Performance Benchmarks</h4>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border/20">
+                      <th className="text-left py-2 px-3 text-muted-foreground font-medium">Benchmark</th>
+                      <th className="text-left py-2 px-3 text-muted-foreground font-medium">Context</th>
+                      <th className="text-left py-2 px-3 text-muted-foreground font-medium">Base Model</th>
+                      <th className="text-left py-2 px-3 text-muted-foreground font-medium">RLM</th>
+                      <th className="text-left py-2 px-3 text-muted-foreground font-medium">Gain</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rlmInnovation.benchmarks.map((b, i) => (
+                      <tr key={i} className="border-b border-border/10">
+                        <td className="py-2 px-3 font-medium text-foreground">{b.benchmark}</td>
+                        <td className="py-2 px-3 font-mono text-foreground/60">{b.contextSize}</td>
+                        <td className="py-2 px-3 font-mono text-red-400/70">{b.baseModel}</td>
+                        <td className="py-2 px-3 font-mono text-emerald-400">{b.rlm}</td>
+                        <td className="py-2 px-3 font-mono text-violet-400">{b.improvement}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Data Flow Diagram */}
+            <div>
+              <h3 className="text-sm font-display font-semibold text-foreground mb-3">Event-Driven Data Flow</h3>
+              <MermaidDiagram chart={contextEngine.mermaidDataFlow} title="Context Engine — Event-Driven Data Flow" />
+            </div>
+
+            {/* Technology Decision Matrix */}
+            <div className="rounded-xl border border-border/30 bg-card/50 overflow-hidden">
+              <div className="px-6 py-4 border-b border-border/20">
+                <h3 className="text-sm font-display font-semibold text-foreground">Technology Decision Matrix</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border/20 bg-secondary/20">
+                      <th className="text-left py-3 px-4 text-muted-foreground font-medium">Component</th>
+                      <th className="text-left py-3 px-4 text-muted-foreground font-medium">Technology</th>
+                      <th className="text-left py-3 px-4 text-muted-foreground font-medium hidden md:table-cell">Justification</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {contextEngineSubsystems.map((sub, i) => (
+                      <tr key={i} className="border-b border-border/10">
+                        <td className="py-3 px-4 font-medium text-foreground">{sub.name}</td>
+                        <td className="py-3 px-4">
+                          <span className="font-mono text-foreground/70">{sub.technology}</span>
+                        </td>
+                        <td className="py-3 px-4 text-foreground/60 hidden md:table-cell">{sub.justification}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Generative UI Layer */}
+        <section id="generative-ui">
+          <SectionHeader number="05" title="Generative UI / UX Layer" />
+          <div className="space-y-8">
+            {/* Overview */}
+            <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-6">
+              <div className="flex items-start gap-3">
+                <Monitor className="w-5 h-5 text-violet-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <h3 className="text-sm font-display font-semibold text-violet-400 mb-1">{uiLayer.subtitle}</h3>
+                  <p className="text-sm leading-relaxed text-foreground/80">{uiLayer.description}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Architecture Diagram */}
+            <div>
+              <h3 className="text-sm font-display font-semibold text-foreground mb-3">UI Architecture</h3>
+              <MermaidDiagram chart={uiLayer.mermaidArchitecture} title="Generative UI — System Architecture" />
+            </div>
+
+            {/* Framework Comparison */}
+            <div className="rounded-xl border border-border/30 bg-card/50 overflow-hidden">
+              <div className="px-6 py-4 border-b border-border/20">
+                <h3 className="text-sm font-display font-semibold text-foreground">UI Framework Comparison</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border/20 bg-secondary/20">
+                      <th className="text-left py-3 px-4 text-muted-foreground font-medium">Framework</th>
+                      <th className="text-left py-3 px-4 text-muted-foreground font-medium">Type</th>
+                      <th className="text-left py-3 px-4 text-muted-foreground font-medium">HITL</th>
+                      <th className="text-left py-3 px-4 text-muted-foreground font-medium">Multi-Agent</th>
+                      <th className="text-left py-3 px-4 text-muted-foreground font-medium hidden lg:table-cell">Maturity</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {uiFrameworks.map((f, i) => (
+                      <tr
+                        key={i}
+                        className={`border-b border-border/10 ${
+                          f.name === "CopilotKit" ? "bg-cyan-500/5" : ""
+                        }`}
+                      >
+                        <td className="py-3 px-4 font-medium text-foreground">
+                          {f.name}
+                          {f.name === "CopilotKit" && (
+                            <span className="ml-2 text-[10px] font-mono text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">
+                              RECOMMENDED
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded"
+                            style={{ color: f.color, backgroundColor: `${f.color}15` }}
+                          >
+                            {f.type}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-foreground/70">{f.hitl}</td>
+                        <td className="py-3 px-4 text-foreground/70">{f.multiAgent}</td>
+                        <td className="py-3 px-4 text-foreground/70 hidden lg:table-cell">{f.maturity}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Three-Tier Model */}
+            <div className="rounded-xl border border-border/30 bg-card/50 p-6">
+              <h3 className="text-sm font-display font-semibold text-foreground mb-4 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-violet-400" /> Three-Tier Generative UI Model
+              </h3>
+              <div className="grid sm:grid-cols-3 gap-3">
+                {[
+                  {
+                    tier: "TIER 1",
+                    name: "Template",
+                    desc: "Pre-built agent panel components — approval cards, status displays, metric dashboards. High control, low agent freedom.",
+                    color: "text-emerald-400",
+                    bg: "bg-emerald-500/10",
+                  },
+                  {
+                    tier: "TIER 2",
+                    name: "Declarative",
+                    desc: "A2UI-style dynamic composition for novel scenarios. Agent emits JSON UI specs rendered by client-side component catalogs.",
+                    color: "text-amber-400",
+                    bg: "bg-amber-500/10",
+                  },
+                  {
+                    tier: "TIER 3",
+                    name: "Open-Ended",
+                    desc: "MCP Apps for rich visualizations — topology maps, log explorers, interactive debugging. Full agent freedom in sandboxed iframes.",
+                    color: "text-rose-400",
+                    bg: "bg-rose-500/10",
+                  },
+                ].map((t) => (
+                  <div key={t.tier} className="rounded-lg border border-border/20 bg-secondary/20 p-4">
+                    <p className={`text-[10px] font-mono ${t.color} mb-1`}>{t.tier}</p>
+                    <p className="text-xs font-medium text-foreground mb-1">{t.name}</p>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">{t.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* HITL Flow */}
+            <div>
+              <h3 className="text-sm font-display font-semibold text-foreground mb-3 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-amber-400" /> Human-in-the-Loop Approval Flow
+              </h3>
+              <MermaidDiagram chart={uiLayer.mermaidHITL} title="Temporal Signal + AG-UI Approval Flow" />
+              <div className="rounded-lg border border-amber-500/15 bg-amber-500/5 p-4 mt-3">
+                <p className="text-xs text-foreground/70 leading-relaxed">
+                  <strong className="text-foreground">Durable approvals:</strong> Because approval state lives in Temporal
+                  (not the UI), approvals survive browser crashes, network disconnects, and server restarts. The workflow
+                  remains safely paused and can be resumed from any UI instance.
+                </p>
+              </div>
+            </div>
+
+            {/* Per-Agent UI Mappings */}
+            <div>
+              <h3 className="text-sm font-display font-semibold text-foreground mb-4">Per-Agent UI Components</h3>
+              <div className="grid gap-3">
+                {agentUIMappings.map((mapping) => (
+                  <motion.div
+                    key={mapping.agentId}
+                    initial={{ opacity: 0, x: -20 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    viewport={{ once: true }}
+                    className="rounded-lg border border-border/30 bg-card/50 p-4"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: mapping.color }} />
+                      <span className="text-sm font-medium text-foreground">{mapping.agentName}</span>
+                    </div>
+                    <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                      {mapping.components.map((comp, i) => (
+                        <div key={i} className="rounded border border-border/20 bg-secondary/20 p-2.5">
+                          <p className="text-[11px] font-medium text-foreground mb-0.5">{comp.name}</p>
+                          <p className="text-[10px] text-muted-foreground leading-relaxed">{comp.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Implementation Strategy */}
         <section id="implementation">
-          <SectionHeader number="04" title="Implementation Strategy: Build vs. Buy" />
+          <SectionHeader number="06" title="Implementation Strategy: Build vs. Buy" />
           <div className="space-y-6">
             <div className="rounded-xl border border-border/30 bg-card/50 overflow-hidden">
               <div className="px-6 py-4 border-b border-border/20">
@@ -376,7 +686,7 @@ export default function Home() {
 
         {/* Risk Assessment */}
         <section id="risks">
-          <SectionHeader number="05" title="Risk Assessment & Mitigation" />
+          <SectionHeader number="07" title="Risk Assessment & Mitigation" />
           <div className="space-y-6">
             <div className="rounded-xl border border-border/30 bg-card/50 overflow-hidden">
               <div className="px-6 py-4 border-b border-border/20">
@@ -467,7 +777,7 @@ export default function Home() {
 
         {/* Roadmap */}
         <section id="roadmap">
-          <SectionHeader number="06" title="First 90 Days Roadmap" />
+          <SectionHeader number="08" title="180-Day Roadmap" />
           <div className="space-y-6">
             {roadmap.map((phase, pi) => (
               <motion.div
@@ -533,7 +843,7 @@ export default function Home() {
 
         {/* References */}
         <section id="references">
-          <SectionHeader number="07" title="References" />
+          <SectionHeader number="09" title="References" />
           <div className="rounded-xl border border-border/30 bg-card/50 p-6">
             <div className="grid gap-2">
               {[
@@ -551,6 +861,13 @@ export default function Home() {
                 { num: 12, text: "ThoughtWorks — Architectural Fitness Functions", url: "#" },
                 { num: 13, text: "Temporal.io — Durable Execution", url: "https://temporal.io/" },
                 { num: 14, text: "Snyk — Package Hallucination: When AI Creates Phantom Packages", url: "https://snyk.io/articles/package-hallucinations/" },
+                { num: 15, text: "Zhang & Kraska — Recursive Language Models (arXiv:2512.24601)", url: "https://arxiv.org/abs/2512.24601" },
+                { num: 16, text: "AG-UI Protocol — Agent-User Interaction Standard", url: "https://docs.ag-ui.com/" },
+                { num: 17, text: "CopilotKit — Open-source AI Copilot Framework", url: "https://docs.copilotkit.ai/" },
+                { num: 18, text: "MCP Apps — Model Context Protocol UI Extension", url: "https://modelcontextprotocol.io/docs/extensions/apps" },
+                { num: 19, text: "Neo4j + Graphiti — Temporal Knowledge Graphs", url: "https://neo4j.com/" },
+                { num: 20, text: "CocoIndex — Incremental Data Indexing Pipeline", url: "https://cocoindex.io/" },
+                { num: 21, text: "NATS JetStream — Lightweight Event Streaming", url: "https://nats.io/" },
               ].map((ref) => (
                 <a
                   key={ref.num}
