@@ -1,0 +1,52 @@
+Ultimate Deep Research Prompt Builder Template
+1. Objective & Core Question(s)
+• Main Research Topic: Agentic DevOps & DevEx Architecture for Abnormal.AI (Post-Series C Cybersecurity Context).
+• Central Research Question(s): How can we architect 5 distinct, high-leverage "Agentic" applications using the Arc42 framework that directly eliminate "Plan → Code → Test" bottlenecks for a Python/Go/Cloud-native engineering org? How do these agents achieve "deterministic proof" of their work to satisfy security compliance while maximizing velocity?
+• Desired Outcome & Report Goal: A technical architectural dossier (Arc42 style) detailing 5 production-ready agentic systems. The report must move beyond "chatbots" to autonomous loop-based agents that function as an "Operating System" for engineering, explicitly aligned with the Abnormal.AI "Staff Software Engineer - GenAI Innovations" role.
+2. Context, Background & Scope
+• Relevant Background Information: Abnormal.AI is a cybersecurity unicorn specializing in AI-based email security. The engineering org is pivoting to be "AI-Native," meaning agents shouldn't just assist but initiate workflows. The target infrastructure is likely AWS, utilizing Python/Go backends. The user persona is a "High-Slope Builder" who prioritizes velocity and "vibe coding" but requires enterprise-grade robustness.
+• Initial Hypothesis/Perspective: The primary bottleneck in modern software engineering isn't code generation (which is solved), but context integration, deterministic validation, and safe execution. The "Agentic" layer must sit between the developer's intent and the CI/CD pipeline, acting as a sandbox.
+• Define Scope and Boundaries:
+• INCLUDE: Internal developer tooling, CI/CD automation, automated remediation, test generation, and architectural scaffolding.
+• EXCLUDE: Customer-facing product features (unless relevant to dogfooding), general "productivity tips," or basic IDE autocomplete suggestions.
+• FOCUS: Safety rails, sandboxing, and "human-on-the-loop" approval mechanisms.
+• Specify Timeframe: Current State of the Art (SOTA) LLM capabilities (Claude 3.5 Sonnet / GPT-4o era) + 6-month forward projection.
+3. Key Terms & Definitions
+• Define Key Terms:
+• Arc42: A template for communicating software and system architectures (focus on: Building Block View, Runtime View, Deployment View, Cross-cutting Concepts).
+• Agentic Workflow: A system where the LLM has access to tools (shell, git, db) and acts in a loop (Observation -> Thought -> Action) rather than a linear Q&A.
+• Deterministic Proof: Mechanisms (formal verification, unit test pass/fail, type checking) used to validate non-deterministic LLM outputs.
+• High-Slope Builder: An engineer who prioritizes shipping velocity and tool-building over process adherence.
+4. Step-by-Step Research Instructions & Sub-Tasks
+• Step 4.1: Pain Point & Opportunity Analysis: Analyze the "Plan → Code → Test" loop in a high-growth cybersecurity startup. Identify the top 5 areas where human friction is highest (e.g., writing integration tests, triaging Sentry errors, updating legacy docs, scaffolding microservices, verifying migration safety).
+• Step 4.2: The "Big 5" Application Selection: Select 5 distinct agentic applications to solve the problems identified in 4.1. Suggestion:
+1. The Auto-Triage Agent: Investigates production alerts, reads logs, proposes root cause, and drafts a PR for the fix.
+2. The Mirror (Test Gen): Agents that read code and generate comprehensive regression suites to provide "deterministic proof."
+3. The Scaffolder (0-to-1): An agent that sets up full repo structure, boilerplate, and infra-as-code based on a spec.
+4. The Janitor (Refactoring): Autonomous technical debt cleanup (typing, dependency updates) running in the background.
+5. The Gatekeeper (CI Review): An agent that reviews PRs specifically for security vulnerabilities and architectural compliance before human review.
+• Step 4.3: Arc42 Architecture Design (The Core): For EACH of the 5 applications, provide a condensed Arc42 analysis:
+• Context View: Who interacts with it? What external systems (GitHub, AWS, Jira) does it touch?
+• Building Block View: Internal structure (Orchestrator, Memory, Tool Interface, Sandbox).
+• Runtime View: Sequence diagram of a typical workflow (e.g., "Agent detects error -> clones repo -> reproduces error -> fixes -> pushes").
+• Cross-cutting Concepts: Specifically address Safety (preventing infinite loops or destructive actions) and Cost (token usage limits).
+• Step 4.4: Technology Stack & Build vs. Buy: Evaluate current frameworks (LangChain, LangGraph, AutoGen, CrewAI) vs. building raw on top of LLM APIs. Recommend the stack for Abnormal.AI.
+• Step 4.5: Critical Analysis & Synthesis: specific critique of why these systems often fail (hallucination, drift, context window limits) and how this specific architecture mitigates those risks.
+5. Desired Output Format & Report Structure
+• Report Structure:
+1. Executive Summary: The "Operating System" vision for Abnormal's engineering.
+2. The 5 Agents (Detailed Architectures): Dedicated sections for each of the 5 apps using Arc42 headers.
+3. Implementation Strategy: Build vs. Buy analysis and "First 90 Days" roadmap.
+4. Risk Assessment: Security implications of letting agents write code.
+• Formatting Requirements: Use standard Markdown. heavily utilize Mermaid.js code blocks for Architecture diagrams (Context Maps, Sequence Diagrams). Use tables for "Tool Capabilities."
+• Role: Staff Software Engineer / Systems Architect.
+6. Role or Perspective
+• Assign AI Role: Act as a Principal Staff Engineer and "AI-Native" Architect at a top-tier tech company. You are pragmatic, cynical about "hype," and obsessed with production reliability. You speak in "Systems Design" (latency, consistency, fault tolerance) not "Marketing Speak."
+7. Justification & Source Requirements
+• Evidence Requirement: Ground architectural decisions in known patterns (e.g., ReAct, Chain-of-Thought, RAG).
+• Source Quality & Type: Reference architectural blogs from engineering-led companies (Uber, Netflix, Airbnb, Anthropic) regarding their internal developer platforms.
+8. Reasoning, Refinement & Flexibility
+• Mandatory Clarification Check: Ensure you understand the difference between a "Copilot" (assistant) and an "Agent" (actor). This report is strictly about Agents.
+• Chain-of-Thought Reasoning: Use CoT to derive the Building Block View. Show how you decided on the state management strategy for long-running agent tasks.
+9. Final Review & Quality Check (AI Self-Correction)
+• Instruction: Before finalizing, ask: "Would a Senior Engineer actually build it this way, or is this just a demo toy?" If it looks like a toy, add complexity regarding error handling, logging, and state recovery.
